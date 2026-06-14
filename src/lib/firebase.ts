@@ -13,29 +13,35 @@ const finalConfig = {
   firestoreDatabaseId: ((import.meta as any).env?.VITE_FIREBASE_DATABASE_ID) || (firebaseConfig as any).firestoreDatabaseId || ""
 };
 
-// If the configuration is blank, we pre-fill safe dummy keys to prevent Firebase initialization crash.
-// This allows the app to load and serve users perfectly with LocalStorage redundancy / Offline Bypass.
-const isBlank = !finalConfig.apiKey || finalConfig.apiKey.trim() === "" || !finalConfig.projectId || finalConfig.projectId.trim() === "";
+// If config is missing, Firestore will be disabled and the app will rely on local storage.
+const isInitialized = finalConfig.apiKey && finalConfig.apiKey.trim() !== "" && finalConfig.projectId && finalConfig.projectId.trim() !== "";
 
-if (isBlank) {
-  finalConfig.apiKey = "AIzaSyDummyKey_For_Offline_Bypass_State_And_Safe_Boot";
-  finalConfig.authDomain = "boys-tv-blz-tv-s-projects.firebaseapp.com";
-  finalConfig.projectId = "boys-tv-blz-tv-s-projects";
-  finalConfig.storageBucket = "boys-tv-blz-tv-s-projects.firebasestorage.app";
-  finalConfig.messagingSenderId = "000000000000";
-  finalConfig.appId = "1:000000000000:web:0000000000000000000000";
-  finalConfig.firestoreDatabaseId = "";
+let app;
+let db;
+let auth;
+let googleProvider;
+let googleDriveProvider;
+
+if (isInitialized) {
+  app = initializeApp(finalConfig);
+  db = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+  }, finalConfig.firestoreDatabaseId || undefined);
+  auth = getAuth(app);
+  googleProvider = new GoogleAuthProvider();
+  googleDriveProvider = new GoogleAuthProvider();
+  googleDriveProvider.addScope('https://www.googleapis.com/auth/drive');
+} else {
+  console.warn("Firebase configuration is missing or invalid. Firestore is disabled; relying on LocalStorage.");
+  // Mock implementations to prevent runtime crashes
+  app = {} as any;
+  db = {} as any;
+  auth = { currentUser: null } as any;
+  googleProvider = {} as any;
+  googleDriveProvider = { addScope: () => {} } as any;
 }
 
-const app = initializeApp(finalConfig);
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-}, finalConfig.firestoreDatabaseId || undefined);
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
-
-export const googleDriveProvider = new GoogleAuthProvider();
-googleDriveProvider.addScope('https://www.googleapis.com/auth/drive');
+export { app, db, auth, googleProvider, googleDriveProvider };
 
 export enum OperationType {
   CREATE = 'create',

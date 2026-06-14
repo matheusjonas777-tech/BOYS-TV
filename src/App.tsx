@@ -389,7 +389,7 @@ export default function App() {
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeModal, setActiveModal] = useState<
-    null | "auth" | "details" | "player" | "admin"
+    null | "auth" | "details" | "player" | "admin" | "admin-password"
   >(null);
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [isGuestDropdownOpen, setIsGuestDropdownOpen] = useState(false);
@@ -14108,7 +14108,7 @@ export const INITIAL_SERIES: Series[] = ${JSON.stringify(formattedSeries, null, 
                           <button
                             onClick={() => {
                               setIsProfileModalOpen(false);
-                              setActiveModal("admin");
+                              setActiveModal("admin-password");
                             }}
                             className="flex-1 bg-white/5 hover:bg-brand-red/10 border border-white/10 p-3 rounded-xl text-[9px] font-black uppercase text-white tracking-widest transition flex items-center justify-center gap-2"
                           >
