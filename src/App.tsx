@@ -1353,9 +1353,25 @@ export default function App() {
       setIsSettingsLoaded(true);
       return;
     }
+
+    // Failover timeout: if settings don't load in 2.5 seconds, force proceed with cached local settings
+    const failoverTimer = setTimeout(() => {
+      console.warn("Firestore connection took over 2.5s during initial page load. Forcing local cache failover mode to keep the landing page fully operational.");
+      try {
+        const cached = localStorage.getItem("blzero_cached_settings");
+        if (cached) {
+          setSiteSettings(JSON.parse(cached));
+        }
+      } catch (e) {
+        console.warn("Could not retrieve local cached settings:", e);
+      }
+      setIsSettingsLoaded(true);
+    }, 2500);
+
     const unsubSettings = onSnapshot(
       doc(firestore, "settings", "global"),
       (docSnap) => {
+        clearTimeout(failoverTimer);
         if (docSnap.exists()) {
           const data = docSnap.data() as SiteSettings;
           setSiteSettings(data);
@@ -1365,6 +1381,7 @@ export default function App() {
         setIsSettingsLoaded(true);
       },
       (error) => {
+        clearTimeout(failoverTimer);
         try {
           handleFirestoreError(error, OperationType.GET, "settings/global");
         } catch (err) {
@@ -1373,7 +1390,10 @@ export default function App() {
         setIsSettingsLoaded(true);
       },
     );
-    return () => unsubSettings();
+    return () => {
+      clearTimeout(failoverTimer);
+      unsubSettings();
+    };
   }, [isZeroCostMode, countApiRead, isDbOperational]);
 
   useEffect(() => {
