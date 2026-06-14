@@ -3467,7 +3467,7 @@ export default function App() {
           </p>
           <div className="flex items-center gap-3 shrink-0 mt-3 md:mt-0">
             <a
-              href="https://console.firebase.google.com/project/luminous-return-273611/firestore/databases/ai-studio-aa3989cb-617b-408a-95dc-4773258661ad/data?openUpgradeDialog=true"
+              href="https://console.firebase.google.com/"
               target="_blank"
               rel="noopener noreferrer"
               className="bg-white text-red-700 hover:text-red-800 px-4 py-2 rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-neutral-100 transition shadow-lg shrink-0 flex items-center gap-1.5"
