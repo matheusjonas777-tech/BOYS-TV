@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Boys Love Zero TV",
+  "description": "Uma plataforma premium de streaming focada em conteúdo Boys Love (BL).",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,247 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isEmailVerified() { return request.auth.token.email_verified == true; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    // SuperAdmin bypass for bootstrap
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.email.lower() == 'matheusjonas777@gmail.com';
+    }
+
+    // Admin check - looks up roles in users collection
+    function isAdmin() { 
+      return isSuperAdmin() || (
+             isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin')
+      ); 
+    }
+
+    // Collection: Users
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.email is string && data.email.size() <= 100 &&
+               data.name is string && data.name.size() <= 100 &&
+               data.role in ['admin', 'user', 'superadmin'] &&
+               data.avatar is string && data.avatar.size() <= 1000 &&
+               (!('isBanned' in data) || data.isBanned is bool) &&
+               (!('favorites' in data) || data.favorites is list) &&
+               (!('lastSeen' in data) || data.lastSeen is number) &&
+               (!('joinedAt' in data) || data.joinedAt is number) &&
+               (!('profileCover' in data) || (data.profileCover is string && data.profileCover.size() <= 1000)) &&
+               (!('watchHistory' in data) || data.watchHistory is list);
+      }
+      
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      
+      allow create: if isSignedIn() && 
+                      request.auth.uid == userId && 
+                      isValidUser(incoming()) && 
+                      (incoming().role == 'user' || isSuperAdmin()) &&
+                      incoming().email == request.auth.token.email &&
+                      !('securityCode' in incoming());
+                      
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (request.auth.uid == userId && 
+         isValidUser(incoming()) && 
+         incoming().role == existing().role && 
+         incoming().email == existing().email &&
+         (!('isBanned' in incoming()) || incoming().isBanned == existing().get('isBanned', false)) &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'avatar', 'profileCover', 'favorites', 'watchHistory', 'lastSeen']))
+      );
+    }
+
+    // Collection: Series
+    match /series/{seriesId} {
+      function isValidSeries(data) {
+        return (data.id is number || data.id is string) &&
+               data.title is string && data.title.size() <= 300 &&
+               (!('cat' in data) || data.cat is string) &&
+               (!('poster' in data) || (data.poster is string && data.poster.size() <= 2500000)) &&
+               (!('banner' in data) || (data.banner is string && data.banner.size() <= 2500000)) &&
+               (!('desc' in data) || (data.desc is string && data.desc.size() <= 10000)) &&
+               (!('episodes' in data) || (data.episodes is list && data.episodes.size() <= 1000)) &&
+               (!('year' in data) || data.year is number) &&
+               (!('genres' in data) || data.genres is list) &&
+               (!('avgRating' in data) || data.avgRating is number) &&
+               (!('ratingsCount' in data) || data.ratingsCount is number) &&
+               (!('isExclusive' in data) || data.isExclusive is bool) &&
+               (!('isPrivate' in data) || data.isPrivate is bool) &&
+               (!('visibleToPublic' in data) || data.visibleToPublic is bool);
+      }
+
+      allow read: if true;
+      allow create: if isAdmin() && isValidSeries(incoming());
+      allow update: if isAdmin() || (
+                      isSignedIn() && 
+                      isValidSeries(incoming()) &&
+                      incoming().diff(existing()).affectedKeys().hasAny(['avgRating', 'ratingsCount', 'episodes']) &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['avgRating', 'ratingsCount', 'episodes']) &&
+                      incoming().title == existing().title
+                    );
+      allow delete: if isAdmin();
+    }
+
+    // Collection: Settings
+    match /settings/global {
+      function isValidSettings(data) {
+        return data.themeColor is string &&
+               data.siteName is string &&
+               (!('heroBanner' in data) || data.heroBanner is string) &&
+               (!('heroLogo' in data) || data.heroLogo is string) &&
+               (!('heroSlogan' in data) || data.heroSlogan is string) &&
+               (!('globalAccessCode' in data) || data.globalAccessCode is string) &&
+               (!('isPrivate' in data) || data.isPrivate is bool) &&
+               (!('availableAvatars' in data) || data.availableAvatars is list) &&
+               (!('ads' in data) || data.ads is list) &&
+               (!('themeMode' in data) || data.themeMode is string) &&
+               (!('bgColor' in data) || data.bgColor is string) &&
+               (!('textColor' in data) || data.textColor is string) &&
+               (!('surfaceColor' in data) || data.surfaceColor is string) &&
+               (!('fontSans' in data) || data.fontSans is string) &&
+               (!('fontDisplay' in data) || data.fontDisplay is string) &&
+               (!('maintenanceMode' in data) || data.maintenanceMode is bool) &&
+               (!('maintenanceBypassCode' in data) || data.maintenanceBypassCode is string) &&
+               (!('serverRegion' in data) || data.serverRegion is string) &&
+               (!('lastDeployment' in data) || data.lastDeployment is number) &&
+               (!('socialLinks' in data) || data.socialLinks is map) &&
+               (!('mediaServers' in data) || data.mediaServers is list) &&
+               (!('maxConcurrentUsers' in data) || data.maxConcurrentUsers is number) &&
+               (!('isQueueEnabled' in data) || data.isQueueEnabled is bool) &&
+               (!('emergencyBypassKey' in data) || data.emergencyBypassKey is string) &&
+               (!('currentSimulatedLoad' in data) || data.currentSimulatedLoad is number) &&
+               (!('googleDriveFolderId' in data) || data.googleDriveFolderId is string) &&
+               (!('googleDriveFolderName' in data) || data.googleDriveFolderName is string) &&
+               (!('backupWebhookUrl' in data) || data.backupWebhookUrl is string) &&
+               (!('emailGreeting' in data) || data.emailGreeting is string) &&
+               (!('emailReleaseMsg' in data) || data.emailReleaseMsg is string) &&
+               (!('emailClosing' in data) || data.emailClosing is string) &&
+               (!('emailTitleTemplate' in data) || data.emailTitleTemplate is string) &&
+                (!('pixKey' in data) || data.pixKey is string) &&
+                (!('pixName' in data) || data.pixName is string) &&
+                (!('showPixOnPlayer' in data) || data.showPixOnPlayer is bool) &&
+                (!('lockForGuests' in data) || data.lockForGuests is bool) &&
+                (!('vipCoreActive' in data) || data.vipCoreActive is bool) &&
+                (!('popunderScript' in data) || data.popunderScript is string) &&
+                (!('isPopunderActive' in data) || data.isPopunderActive is bool) &&
+                (!('adsenseCode' in data) || data.adsenseCode is string) &&
+                (!('isAdsenseActive' in data) || data.isAdsenseActive is bool) &&
+                (!('customDomain' in data) || data.customDomain is string) &&
+                (!('domainVerified' in data) || data.domainVerified is bool) &&
+                (!('domainDnsTxt' in data) || data.domainDnsTxt is string) &&
+                (!('domainProvider' in data) || data.domainProvider is string) &&
+                (!('domainSslStatus' in data) || data.domainSslStatus is string) &&
+                (!('driveSyncLastCheck' in data) || data.driveSyncLastCheck is number) &&
+                (!('driveSyncStatus' in data) || data.driveSyncStatus is string) &&
+                (!('driveSyncDetails' in data) || data.driveSyncDetails is string) &&
+                 (!('whatsappCentralLink' in data) || data.whatsappCentralLink is string) &&
+                 (!('shareBaseUrl' in data) || data.shareBaseUrl is string) &&
+                 (!('shareImageUrl' in data) || data.shareImageUrl is string) &&
+                 (!('sharingMessageTemplate' in data) || data.sharingMessageTemplate is string) &&
+                 (!('secretAdminNote' in data) || data.secretAdminNote is string) &&
+               (!('databaseReplicas' in data) || data.databaseReplicas is list);
+      }
+      allow read: if true;
+      allow write: if isAdmin() && isValidSettings(incoming());
+    }
+
+    // Collection: Active Sessions (Real-time visitor tracking and sharing metrics)
+    match /active_sessions/{sessionId} {
+      function isValidActiveSession(data) {
+        return data.visitorId is string && data.visitorId.size() <= 128 &&
+               data.email is string && data.email.size() <= 100 &&
+               data.watchingTitle is string && data.watchingTitle.size() <= 300 &&
+               (!('deviceBrand' in data) || (data.deviceBrand is string && data.deviceBrand.size() <= 128)) &&
+               (!('locale' in data) || (data.locale is string && data.locale.size() <= 32)) &&
+               (!('sharedFrom' in data) || (data.sharedFrom is string && data.sharedFrom.size() <= 128)) &&
+               data.lastActive is number;
+      }
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create, update: if isValidActiveSession(incoming()) && isValidId(sessionId);
+      allow delete: if isAdmin();
+    }
+
+    // Collection: Recovery Requests
+    match /recoveryRequests/{requestId} {
+      function isValidRecovery(data) {
+        return data.email is string && data.email.size() <= 100 &&
+               data.status in ['pending', 'approved', 'rejected'] &&
+               data.createdAt is number &&
+               (!('resetCode' in data) || data.resetCode is string);
+      }
+      allow create: if true; // Publicly accessible to request recovery
+      allow read, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Collection: Ratings
+    match /ratings/{ratingId} {
+      function isValidRating(data) {
+        return data.userId == request.auth.uid &&
+               data.itemId is string && data.itemId.size() <= 256 &&
+               data.value is number && data.value >= 1 && data.value <= 5;
+      }
+
+      allow get, list: if true;
+      allow create: if isSignedIn() && isValidRating(incoming()) && isValidId(ratingId);
+      allow update: if isSignedIn() && 
+                    existing().userId == request.auth.uid &&
+                    isValidRating(incoming()) && 
+                    incoming().userId == existing().userId && 
+                    incoming().itemId == existing().itemId &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['value']);
+      allow delete: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    // Collection: Notifications
+    match /notifications/{notificationId} {
+      function isValidNotification(data) {
+        return data.userId is string && data.userId.size() <= 128 &&
+               data.title is string && data.title.size() <= 200 &&
+               data.message is string && data.message.size() <= 1000 &&
+               (!('link' in data) || (data.link is string && data.link.size() <= 1000)) &&
+               data.isRead is bool &&
+               data.createdAt is number;
+      }
+      
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAdmin() && isValidNotification(incoming());
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (resource.data.userId == request.auth.uid &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['isRead']) &&
+         isValidNotification(incoming()))
+      );
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Collection: Mail Logs
+    match /mail_logs/{logId} {
+      function isValidMailLog(data) {
+        return data.recipientEmail is string && data.recipientEmail.size() <= 128 &&
+               data.recipientName is string && data.recipientName.size() <= 128 &&
+               data.subject is string && data.subject.size() <= 256 &&
+               data.body is string && data.body.size() <= 5000 &&
+               data.sentAt is number &&
+               data.status is string && data.status.size() <= 64;
+      }
+      
+      allow read, write: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "entities": {
+    "user": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user", "superadmin"] },
+        "avatar": { "type": "string" },
+        "isBanned": { "type": "boolean" },
+        "favorites": { "type": "array", "items": { "type": "number" } },
+        "lastSeen": { "type": "number" },
+        "joinedAt": { "type": "number" },
+        "securityCode": { "type": "string" },
+        "profileCover": { "type": "string" },
+        "watchHistory": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "seriesId": { "type": "number" },
+              "episodeIndex": { "type": "number" },
+              "timestamp": { "type": "number" }
+            }
+          }
+        }
+      },
+      "required": ["email", "name", "role", "avatar"]
+    },
+    "series": {
+      "title": "Series",
+      "description": "BL Series or Movie",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "title": { "type": "string" },
+        "cat": { "type": "string", "enum": ["Destaque", "Série", "Filme"] },
+        "genres": { "type": "array", "items": { "type": "string" } },
+        "poster": { "type": "string" },
+        "banner": { "type": "string" },
+        "desc": { "type": "string" },
+        "episodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "url": { "type": "string" },
+              "subtitles": { "type": "string" },
+              "avgRating": { "type": "number" },
+              "ratingsCount": { "type": "number" }
+            }
+          }
+        },
+        "avgRating": { "type": "number" },
+        "ratingsCount": { "type": "number" }
+      },
+      "required": ["id", "title", "cat", "poster", "banner", "desc", "episodes"]
+    },
+    "rating": {
+      "title": "Rating",
+      "description": "User rating for a series or episode",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "itemId": { "type": "string" },
+        "value": { "type": "number" }
+      },
+      "required": ["userId", "itemId", "value"]
+    },
+    "siteSettings": {
+      "title": "SiteSettings",
+      "description": "Global settings for the application",
+      "type": "object",
+      "properties": {
+        "themeColor": { "type": "string" },
+        "siteName": { "type": "string" },
+        "heroBanner": { "type": "string" },
+        "heroLogo": { "type": "string" },
+        "heroSlogan": { "type": "string" },
+        "globalAccessCode": { "type": "string" },
+        "isPrivate": { "type": "boolean" },
+        "availableAvatars": { "type": "array", "items": { "type": "string" } },
+        "customDomain": { "type": "string" },
+        "shareImageUrl": { "type": "string" },
+        "shareBaseUrl": { "type": "string" },
+        "domainVerified": { "type": "boolean" },
+        "domainDnsTxt": { "type": "string" },
+        "domainProvider": { "type": "string" },
+        "domainSslStatus": { "type": "string" },
+        "driveSyncLastCheck": { "type": "number" },
+        "driveSyncStatus": { "type": "string" },
+        "driveSyncDetails": { "type": "string" }
+      },
+      "required": ["themeColor", "siteName"]
+    },
+    "recoveryRequest": {
+      "title": "RecoveryRequest",
+      "description": "Request to recover account access",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["email", "status", "createdAt"]
+    },
+    "notification": {
+      "title": "Notification",
+      "description": "User notification",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "link": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "title", "message", "isRead", "createdAt"]
+    },
+    "mailLog": {
+      "title": "MailLog",
+      "description": "Smtp email send log",
+      "type": "object",
+      "properties": {
+        "recipientEmail": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "subject": { "type": "string" },
+        "body": { "type": "string" },
+        "sentAt": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["recipientEmail", "recipientName", "subject", "body", "sentAt", "status"]
+    },
+    "activeSession": {
+      "title": "ActiveSession",
+      "description": "Real-time user visitor active session",
+      "type": "object",
+      "properties": {
+        "visitorId": { "type": "string" },
+        "email": { "type": "string" },
+        "watchingTitle": { "type": "string" },
+        "deviceBrand": { "type": "string" },
+        "locale": { "type": "string" },
+        "sharedFrom": { "type": "string" },
+        "lastActive": { "type": "number" }
+      },
+      "required": ["visitorId", "email", "watchingTitle", "lastActive"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "user",
+      "description": "Collection of user profiles"
+    },
+    "series/{seriesId}": {
+      "schema": "series",
+      "description": "Collection of BL series and movies"
+    },
+    "ratings/{ratingId}": {
+      "schema": "rating",
+      "description": "Collection of ratings"
+    },
+    "settings/global": {
+      "schema": "siteSettings",
+      "description": "Global site configuration"
+    },
+    "recoveryRequests/{requestId}": {
+      "schema": "recoveryRequest",
+      "description": "Account recovery requests"
+    },
+    "notifications/{notificationId}": {
+      "schema": "notification",
+      "description": "Collection of user notifications"
+    },
+    "mail_logs/{logId}": {
+      "schema": "mailLog",
+      "description": "smtp mail transfer logs"
+    },
+    "active_sessions/{sessionId}": {
+      "schema": "activeSession",
+      "description": "Real-time viewer active tracker"
+    }
+  }
+}
