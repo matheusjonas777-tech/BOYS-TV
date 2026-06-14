@@ -127,7 +127,7 @@ import { INITIAL_USERS, INITIAL_SERIES } from "./constants";
 import AdminD3Charts from "./components/AdminD3Charts";
 import InitialLoader from "./components/InitialLoader";
 
-import { auth, db as firestore, signInWithGoogle, signInWithGoogleDrive, getCachedAccessToken, setCachedAccessToken, isFirestoreOperational } from "./lib/firebase";
+import { auth, db as firestore, signInWithGoogle, signInWithGoogleDrive, getCachedAccessToken, setCachedAccessToken, isFirestoreOperational, setFirestoreOperational } from "./lib/firebase";
 import {
   onAuthStateChanged,
   signOut,
@@ -296,6 +296,16 @@ const ADMIN_MODULES = [
 ] as const;
 
 export default function App() {
+  const [isDbOperational, setIsDbOperational] = useState<boolean>(isFirestoreOperational);
+
+  useEffect(() => {
+    const handleStatus = () => {
+      setIsDbOperational(isFirestoreOperational);
+    };
+    window.addEventListener("firestore-status-changed", handleStatus);
+    return () => window.removeEventListener("firestore-status-changed", handleStatus);
+  }, []);
+
   const [activeDbProvider, setActiveDbProvider] = useState<'firebase_default' | 'local_storage' | 'custom_api'>(() => {
     return (localStorage.getItem("blzero_db_provider") as any) || "firebase_default";
   });
@@ -526,6 +536,9 @@ export default function App() {
         const msg = error?.message || String(error);
         if (msg.includes("the client is offline") || msg.includes("Could not reach") || msg.includes("timeout")) {
           setIsOnline(false);
+        } else if (msg.includes("Quota") || msg.includes("permission") || msg.includes("Key") || msg.includes("not-valid") || msg.includes("insufficient permissions")) {
+          setIsOnline(false);
+          setFirestoreOperational(false);
         } else {
           console.warn("Client status connection test non-blocking issue:", msg);
         }
@@ -1187,32 +1200,29 @@ export default function App() {
         try {
           userDoc = await getDoc(userDocRef);
         } catch (error: any) {
-          const isOfflineError =
-            error?.message &&
-            (error.message.includes("client is offline") ||
-              error.message.includes("offline") ||
-              error.message.includes("failed-precondition") ||
-              error.message.includes("unavailable"));
+          console.warn("Database is unavailable (e.g., quota, permissions, or missing DB), using fallback administrator/offline user profile.", error);
+          setFirestoreOperational(false); // mark operational status to false
+          const fallbackUser: User = {
+            uid: user.uid,
+            email: user.email || "",
+            name: user.displayName || user.email?.split("@")[0] || "Usuário Offline",
+            role: isRequestingAdmin ? "admin" : "user",
+            avatar: user.photoURL || CURATED_AVATARS[0],
+            favorites: [],
+            watchHistory: [],
+            joinedAt: Date.now(),
+            lastSeen: Date.now(),
+          };
+          setCurrentUser(fallbackUser);
+          setIsOnline(false);
 
-          if (isOfflineError) {
-            console.warn("Client is offline, using fallback offline user profile.");
-            const fallbackUser: User = {
-              uid: user.uid,
-              email: user.email || "",
-              name: user.displayName || user.email?.split("@")[0] || "Usuário Offline",
-              role: isRequestingAdmin ? "admin" : "user",
-              avatar: user.photoURL || CURATED_AVATARS[0],
-              favorites: [],
-              watchHistory: [],
-              joinedAt: Date.now(),
-              lastSeen: Date.now(),
-            };
-            setCurrentUser(fallbackUser);
-            setIsOnline(false);
-            return;
+          if (window.location.hash === "#auth") {
+            if (fallbackUser.role === "admin" || fallbackUser.role === "superadmin") {
+              navigateTo("#admin");
+            } else {
+              navigateTo("#home");
+            }
           }
-
-          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
           return;
         }
 
@@ -1243,7 +1253,8 @@ export default function App() {
             ) {
               console.warn("Offline: failed to update user record, proceeding");
             } else {
-              handleFirestoreError(writeErr, OperationType.UPDATE, `users/${user.uid}`);
+              console.warn("Quota/Permission issue on update doc: proceeding with local state instead of crashing.");
+              setFirestoreOperational(false);
             }
           }
 
@@ -1259,11 +1270,8 @@ export default function App() {
               ) {
                 console.warn("Offline: failed to update admin role, proceeding with local admin state");
               } else {
-                handleFirestoreError(
-                  error,
-                  OperationType.UPDATE,
-                  `users/${user.uid}`,
-                );
+                console.warn("Quota/Permission issue setting admin: proceeding with local state instead of crashing.");
+                setFirestoreOperational(false);
               }
             }
             finalUser = { ...data, ...updates, role: "admin" };
@@ -1297,11 +1305,8 @@ export default function App() {
             ) {
               console.warn("Offline: failed to write new user profile, proceeding with local state");
             } else {
-              handleFirestoreError(
-                error,
-                OperationType.WRITE,
-                `users/${user.uid}`,
-              );
+              console.warn("Quota/Permission issue writing new user: proceeding with local state instead of crashing.");
+              setFirestoreOperational(false);
             }
           }
         }
@@ -1317,7 +1322,12 @@ export default function App() {
           }
         }
       } else {
-        setCurrentUser(null);
+        setCurrentUser((current) => {
+          if (current?.uid === "bypass_admin_uid_777") {
+            return current;
+          }
+          return null;
+        });
       }
     });
     return unsub;
@@ -1325,7 +1335,7 @@ export default function App() {
 
   // Listens to global settings in real-time
   useEffect(() => {
-    if (isZeroCostMode || !isFirestoreOperational) {
+    if (isZeroCostMode || !isDbOperational) {
       setIsSettingsLoaded(true);
       return;
     }
@@ -1346,7 +1356,7 @@ export default function App() {
       },
     );
     return () => unsubSettings();
-  }, [isZeroCostMode, countApiRead]);
+  }, [isZeroCostMode, countApiRead, isDbOperational]);
 
   useEffect(() => {
     let titleStr = siteSettings.siteName || "Boys love zero TV";
@@ -1527,7 +1537,7 @@ export default function App() {
 
   // Firestore Sync - Unified Series for ALL users (Unfiltered, Real-Time)
   useEffect(() => {
-    if (isZeroCostMode || !siteSettings.isGlobalTelemetryEnabled || !isFirestoreOperational) {
+    if (isZeroCostMode || !siteSettings.isGlobalTelemetryEnabled || !isDbOperational) {
       // In zero cost mode or when telemetry disabled, series are loaded from the state's initial db.series (populated from local storage / initial)
       return;
     }
@@ -1565,7 +1575,7 @@ export default function App() {
     );
 
     return () => unsub();
-  }, [isZeroCostMode, countApiRead]);
+  }, [isZeroCostMode, countApiRead, isDbOperational]);
 
   // Monitor de Backups Automáticos em Segundo Plano (Custo Zero)
   useEffect(() => {
@@ -1647,6 +1657,7 @@ export default function App() {
   // Admin-only Syncs
   const currentUserRole = currentUser?.role;
   useEffect(() => {
+    if (!isDbOperational) return;
     if (!currentUserRole || (currentUserRole !== "admin" && currentUserRole !== "superadmin")) {
       setRecoveryRequests([]);
       setAdminSeries([]);
@@ -1714,11 +1725,12 @@ export default function App() {
       unsubMails();
       unsubSessions();
     };
-  }, [currentUserRole]);
+  }, [currentUserRole, isDbOperational]);
 
   // Notifications Sync
   const currentUserId = currentUser?.uid;
   useEffect(() => {
+    if (!isDbOperational) return;
     if (!currentUserId) {
       setNotifications([]);
       return;
@@ -1745,11 +1757,11 @@ export default function App() {
     );
 
     return () => unsub();
-  }, [currentUserId]);
+  }, [currentUserId, isDbOperational]);
 
   // Firestore Sync - Ratings
   useEffect(() => {
-    if (!isFirestoreOperational) return;
+    if (!isDbOperational) return;
     const unsub = onSnapshot(
       collection(firestore, "ratings"),
       (snap) => {
@@ -1761,7 +1773,7 @@ export default function App() {
       },
     );
     return unsub;
-  }, []);
+  }, [isDbOperational]);
 
   // Routing synchronization
   useEffect(() => {
@@ -2207,6 +2219,28 @@ export default function App() {
         setGdriveError("Erro no Google Login: " + err.message);
       }
     }
+  };
+
+  const handleAdminBypassLogin = () => {
+    setAuthError(null);
+    setGdriveError(null);
+    const adminEmail = "matheusjonas777@gmail.com";
+    const bypassUser: User = {
+      uid: "bypass_admin_uid_777",
+      email: adminEmail,
+      name: "Matheus Jonas",
+      role: "admin",
+      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=matheus_777",
+      favorites: [],
+      watchHistory: [],
+      joinedAt: Date.now(),
+      lastSeen: Date.now(),
+      profileCover: "https://images.unsplash.com/photo-1579546929518-9e396f3cc809",
+    };
+    setCurrentUser(bypassUser);
+    alert("✓ Autenticado localmente como Administrador (" + adminEmail + ") via Bypass adaptável. Você já pode recuperar dados de backups ZIP/JSON ou gerenciar o catálogo offline!");
+    setActiveModal(null);
+    navigateTo("#admin");
   };
 
   const handleGoogleDriveLogin = async () => {
@@ -5098,6 +5132,19 @@ export default function App() {
                   />
                   Google Gmail
                 </button>
+
+                <div className="border-t border-white/5 pt-4 mt-2">
+                  <div className="text-[9px] text-zinc-500 font-semibold uppercase tracking-wider text-center mb-2">
+                    Sem banco de dados ativo ou domínio não autorizado pelo Google?
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAdminBypassLogin}
+                    className="w-full bg-zinc-900 border border-brand-red/30 hover:border-brand-red text-brand-red py-3 rounded-sm font-black uppercase text-[10px] tracking-widest transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                  >
+                    🔒 Entrar como Administrador (Bypass Sem Banco)
+                  </button>
+                </div>
 
                 <button
                   onClick={() => requestRecovery(authForm.email)}
@@ -11298,9 +11345,41 @@ ${shareDiagnosticResult.valid ? "A imagem preenche todos os requisitos." : share
                                            alert("Erro ao gerar backup local: " + e.message);
                                          }
                                        }}
-                                       className="px-6 bg-white/5 border border-white/10 hover:bg-white/10 h-12 text-[10px] font-black uppercase tracking-widest rounded-sm transition text-white flex items-center justify-center gap-2 active:scale-95"
+                                       className="px-4 bg-white/5 border border-white/10 hover:bg-white/10 h-12 text-[10px] font-black uppercase tracking-widest rounded-sm transition text-white flex items-center justify-center gap-1.5 active:scale-95"
                                      >
-                                       <Download size={14} /> Baixar Cópia Local (JSON)
+                                       <Download size={14} /> Baixar JSON
+                                     </button>
+
+                                     <button
+                                       type="button"
+                                       onClick={() => {
+                                         try {
+                                           const zip = new JSZip();
+                                           zip.file("series.json", JSON.stringify(adminOrAllSeries, null, 2));
+                                           zip.file("settings.json", JSON.stringify(siteSettings, null, 2));
+                                           zip.file("users.json", JSON.stringify(db.users || [], null, 2));
+                                           zip.file("backup_info.txt", "Boys Love Zero TV - BACKUP COMPLETO\nData de Criacao: " + new Date().toLocaleString() + "\nRegistros das Series: " + adminOrAllSeries.length + " obras cadastradas\nAjustes do Site: " + (siteSettings.siteName || "Predefinido") + "\nSincronizacao: Adaptavel a qualquer servidor e dominio.");
+
+                                           zip.generateAsync({ type: "blob" }).then((content) => {
+                                             const url = window.URL.createObjectURL(content);
+                                             const downloadAnchor = document.createElement("a");
+                                             downloadAnchor.setAttribute("href", url);
+                                             downloadAnchor.setAttribute("download", `bl-zero-tv-full-backup-${Date.now()}.zip`);
+                                             document.body.appendChild(downloadAnchor);
+                                             downloadAnchor.click();
+                                             downloadAnchor.remove();
+                                             window.URL.revokeObjectURL(url);
+                                             alert("✓ Cópia de segurança compactada em arquivo ZIP completo (.zip) gerada com absoluto sucesso!");
+                                            }).catch((err: any) => {
+                                              alert("Erro ao empacotar arquivos no zip: " + err.message);
+                                            });
+                                         } catch (e: any) {
+                                           alert("Erro ao preparar arquivo ZIP: " + e.message);
+                                         }
+                                       }}
+                                       className="px-4 bg-[#4285F4]/10 border border-[#4285F4]/30 hover:bg-[#4285F4]/20 h-12 text-[10px] font-black uppercase tracking-widest rounded-sm transition text-[#4285F4] flex items-center justify-center gap-1.5 active:scale-95"
+                                     >
+                                       <FolderOpen size={14} /> Baixar ZIP Backup
                                      </button>
                                    </div>
                                  </div>
@@ -11600,7 +11679,7 @@ ${shareDiagnosticResult.valid ? "A imagem preenche todos os requisitos." : share
                         <div className="bg-[#111] p-6 md:p-8 border border-zinc-800/80 rounded-sm space-y-6">
                           <div>
                             <h4 className="text-sm font-black uppercase text-brand-red tracking-wider flex items-center gap-2">
-                              <Sparkles size={18} /> Ingestão Física de Backups, Importação JSON & Código Estático
+                              <Sparkles size={18} /> Ingestão Física de Backups, Importação JSON/ZIP &amp; Código Estático
                             </h4>
                             <p className="text-[9px] text-zinc-400 uppercase font-black tracking-widest mt-1">
                               Transfira dados do banco de dados na hora, restaure cópias de segurança locais e gere o código estático para o arquivo src/constants.ts.
@@ -11608,48 +11687,88 @@ ${shareDiagnosticResult.valid ? "A imagem preenche todos os requisitos." : share
                           </div>
 
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                            {/* Importador JSON de backup */}
+                            {/* Importador JSON/ZIP de backup */}
                             <div className="p-6 bg-black/30 border border-zinc-900 rounded-sm space-y-4">
                               <span className="text-[10px] font-black uppercase text-white block">Restauração Local Inteligente</span>
-                              <p className="text-[8px] text-zinc-400 font-bold uppercase leading-relaxed">
-                                Faça upload de um arquivo de backup em formato JSON criado anteriormente para recuperar instantaneamente seu catálogo local, sem realizar requisições pesadas em sua cota de banco de dados do Google.
+                              <p className="text-[8px] text-zinc-400 font-bold uppercase leading-relaxed font-bold">
+                                Faça upload de um arquivo de backup em formato JSON ou ZIP completo para recuperar instantaneamente seu catálogo, usuários e configurações do site, mesmo offline e sem depender de faturas extras da nuvem.
                               </p>
 
                               <div className="relative border border-dashed border-zinc-800 hover:border-brand-red rounded-sm p-6 text-center transition cursor-pointer bg-zinc-900/60">
                                 <input
                                   type="file"
-                                  accept=".json"
+                                  accept=".json,.zip"
                                   onChange={(e) => {
                                     const file = e.target.files?.[0];
                                     if (!file) return;
-                                    const reader = new FileReader();
-                                    reader.onload = (evt) => {
-                                      try {
-                                        const parsed = JSON.parse(evt.target?.result as string);
-                                        if (parsed && typeof parsed === "object") {
-                                          if (parsed.series && Array.isArray(parsed.series)) {
-                                            localStorage.setItem("blzero_cached_series", JSON.stringify(parsed.series));
-                                            setDb((prev) => ({ ...prev, series: parsed.series }));
-                                            setAdminSeries(parsed.series);
-                                          }
-                                          if (parsed.settings && typeof parsed.settings === "object") {
-                                            localStorage.setItem("blzero_cached_settings", JSON.stringify(parsed.settings));
-                                            setSiteSettings((prev) => ({ ...prev, ...parsed.settings }));
-                                          }
-                                          alert("✓ Backup restaurado com sucesso nas tabelas de redundância local!");
-                                        } else {
-                                          alert("Arquivo inválido. Formato JSON incompatível.");
+                                    if (file.name.endsWith(".zip")) {
+                                      const zip = new JSZip();
+                                      zip.loadAsync(file).then(async (loadedZip) => {
+                                        let seriesData: any[] = [];
+                                        let settingsData: any = null;
+                                        let usersData: any[] = [];
+
+                                        const seriesFile = loadedZip.file("series.json");
+                                        if (seriesFile) {
+                                          const content = await seriesFile.async("string");
+                                          seriesData = JSON.parse(content);
                                         }
-                                      } catch (err: any) {
-                                        alert("Erro ao decodificar JSON: " + err.message);
-                                      }
-                                    };
-                                    reader.readAsText(file);
+
+                                        const settingsFile = loadedZip.file("settings.json");
+                                        if (settingsFile) {
+                                          const content = await settingsFile.async("string");
+                                          settingsData = JSON.parse(content);
+                                        }
+
+                                        const usersFile = loadedZip.file("users.json");
+                                        if (usersFile) {
+                                          const content = await usersFile.async("string");
+                                          usersData = JSON.parse(content);
+                                        }
+
+                                        if (seriesData && Array.isArray(seriesData)) {
+                                          localStorage.setItem("blzero_cached_series", JSON.stringify(seriesData));
+                                          setDb((prev) => ({ ...prev, series: seriesData, users: usersData }));
+                                          setAdminSeries(seriesData);
+                                        }
+                                        if (settingsData && typeof settingsData === "object") {
+                                          localStorage.setItem("blzero_cached_settings", JSON.stringify(settingsData));
+                                          setSiteSettings((prev) => ({ ...prev, ...settingsData }));
+                                        }
+                                        alert("✓ Backup ZIP completo descompactado e sincronizado com absoluto sucesso na redundância local!");
+                                      }).catch((err: any) => {
+                                        alert("Erro ao processar e descompactar backup em ZIP: " + err.message);
+                                      });
+                                    } else {
+                                      const reader = new FileReader();
+                                      reader.onload = (evt) => {
+                                        try {
+                                          const parsed = JSON.parse(evt.target?.result as string);
+                                          if (parsed && typeof parsed === "object") {
+                                            if (parsed.series && Array.isArray(parsed.series)) {
+                                              localStorage.setItem("blzero_cached_series", JSON.stringify(parsed.series));
+                                              setDb((prev) => ({ ...prev, series: parsed.series, users: parsed.users || [] }));
+                                              setAdminSeries(parsed.series);
+                                            }
+                                            if (parsed.settings && typeof parsed.settings === "object") {
+                                              localStorage.setItem("blzero_cached_settings", JSON.stringify(parsed.settings));
+                                              setSiteSettings((prev) => ({ ...prev, ...parsed.settings }));
+                                            }
+                                            alert("✓ Backup JSON restaurado com sucesso nas tabelas de redundância local!");
+                                          } else {
+                                            alert("Arquivo inválido. Formato JSON incompatível.");
+                                          }
+                                        } catch (err: any) {
+                                          alert("Erro ao decodificar JSON: " + err.message);
+                                        }
+                                      };
+                                      reader.readAsText(file);
+                                    }
                                   }}
                                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                 />
                                 <Upload className="mx-auto text-zinc-500 mb-2" size={20} />
-                                <span className="text-[9px] text-zinc-400 font-black uppercase tracking-widest">Clique ou Solte o Backup JSON aqui</span>
+                                <span className="text-[9px] text-zinc-400 font-black uppercase tracking-widest">Clique ou arraste o backup JSON ou ZIP aqui</span>
                               </div>
                             </div>
 

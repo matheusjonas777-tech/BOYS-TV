@@ -40,8 +40,12 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes('Quota') || msg.includes('permission') || msg.includes('Key') || msg.includes('not-valid') || msg.includes('unauthorized-domain')) {
+    setFirestoreOperational(false);
+  }
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: msg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -62,13 +66,20 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 export let isFirestoreOperational = true;
 
+export function setFirestoreOperational(val: boolean) {
+  isFirestoreOperational = val;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("firestore-status-changed"));
+  }
+}
+
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error: any) {
-    isFirestoreOperational = false;
+    setFirestoreOperational(false);
     const msg = error?.message || String(error);
-    if (msg.includes('the client is offline') || msg.includes('Could not reach') || msg.includes('timeout') || msg.includes('Quota')) {
+    if (msg.includes('the client is offline') || msg.includes('Could not reach') || msg.includes('timeout') || msg.includes('Quota') || msg.includes('permission')) {
       console.warn("Please check your Firebase configuration. Falling back to cached/offline Firestore operations.");
     } else {
       console.warn("Connection test failed (non-blocking):", msg);
