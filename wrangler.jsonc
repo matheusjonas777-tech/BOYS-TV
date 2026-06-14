@@ -1,10 +1,22 @@
 {
-  "name": "zero-tv",
+  "name": "boyslovezerotv",
   "compatibility_date": "2024-04-03",
   "assets": {
     "directory": "dist"
   },
   "observability": {
-    "enabled": true
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
   }
 }
